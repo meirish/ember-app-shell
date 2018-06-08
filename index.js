@@ -37,44 +37,38 @@ module.exports = {
       return;
     }
     let { chromeFlags, outputFile, visitPath, skipCritical, root } = this.app.options['ember-app-shell'];
+    let url = path.join(`http://localhost:${SERVER_PORT}`, visitPath);
+
+    let launchPuppeteer = async function() {
+      let browser = await puppeteer.launch(chromeFlags);
+      let page = await browser.newPage();
+      await page.goto(url);
+      let appSelector = '.ember-view';
+      await page.waitForSelector(appSelector);
+      let content = await page.evaluate(appSelector => document.querySelector(appSelector).outerHTML, appSelector);
+
+      let indexHTML = fs.readFileSync(path.join(directory, outputFile)).toString();
+      let appShellHTML = indexHTML.replace(PLACEHOLDER, content);
+
+      if (skipCritical) {
+        fs.writeFileSync(path.join(directory, outputFile), appShellHTML, 'utf8');
+      } else {
+        let criticalOptions = Object.assign(DEFAULT_CRITICAL_OPTIONS, {
+          inline: true,
+          base: directory,
+          folder: directory,
+          html: appShellHTML,
+          dest: outputFile
+        }, this.app.options['ember-app-shell'].criticalCSSOptions);
+        await critical.generate(criticalOptions);
+      }
+      await browser.close();
+    }
 
     return this._launchAppServer(directory, root).then(server => {
-      return puppeteer.launch(chromeFlags).then(browser => {
-        return browser.newPage().then(page => {
-          let url = path.join(`http://localhost:${SERVER_PORT}`, visitPath);
-          return page.goto(url).then(() => {
-            const appSelector = '.ember-view';
-            return page.waitForSelector(appSelector).then(() => {
-              return page.evaluate(appSelector => {
-                return document.body.querySelector(appSelector).outerHTML;
-              }, appSelector).then(content => {
-                let indexHTML = fs.readFileSync(path.join(directory, outputFile)).toString();
-                let appShellHTML = indexHTML.replace(PLACEHOLDER, content);
-
-                if (skipCritical) {
-                  fs.writeFileSync(path.join(directory, outputFile), appShellHTML, 'utf8');
-                  return;
-                }
-                let criticalOptions = Object.assign(DEFAULT_CRITICAL_OPTIONS, {
-                  inline: true,
-                  base: directory,
-                  folder: directory,
-                  html: appShellHTML,
-                  dest: outputFile
-                }, this.app.options['ember-app-shell'].criticalCSSOptions);
-                return critical.generate(criticalOptions);
-              }).then(() => {
-                browser.close();
-                server.close();
-              },
-              (err) => {
-                browser.close();
-                server.close();
-              })
-            });
-          });
-        });
-      });
+      return launchPuppeteer()
+        .then(() => server.close())
+        .catch(() => server.close());
     });
   },
 
@@ -101,7 +95,6 @@ module.exports = {
         resolve(server);
       });
     });
-  }
+  },
 
 };
-
